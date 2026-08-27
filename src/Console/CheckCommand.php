@@ -3,8 +3,10 @@
 namespace Muchwat\OpendataloaderPdf\Console;
 
 use Illuminate\Console\Command;
+use Illuminate\Contracts\Process\ProcessResult;
 use Illuminate\Process\Exceptions\ProcessTimedOutException;
 use Illuminate\Support\Facades\Process;
+use Muchwat\OpendataloaderPdf\Support\CliProcess;
 use Throwable;
 
 /**
@@ -25,74 +27,27 @@ class CheckCommand extends Command
 
     public function handle(): int
     {
-        if (! config('opendataloader-pdf.enabled')) {
-            $this->components->warn('OPENDATALOADER_PDF_ENABLED is not set to true - extraction is currently disabled.');
-
-            return self::FAILURE;
-        }
-
         $binary = trim((string) config('opendataloader-pdf.command'));
 
-        if ($binary === '') {
-            $this->components->error('OPENDATALOADER_PDF_COMMAND is empty.');
-
+        if (! $this->ensureCommandConfigured($binary)) {
             return self::FAILURE;
         }
 
         $this->components->info("Checking \"{$binary}\"...");
 
-        $pending = Process::timeout(15);
+        $result = $this->runHelpCheck($binary);
 
-        if (filled($extraPath = config('opendataloader-pdf.path'))) {
-            $pending = $pending->env([
-                'PATH' => rtrim($extraPath, ':').':'.(getenv('PATH') ?: '/usr/bin:/bin:/usr/sbin:/sbin'),
-            ]);
-        }
-
-        try {
-            $result = $pending->run([...preg_split('/\s+/', $binary), '--help']);
-        } catch (ProcessTimedOutException) {
-            $this->components->error('The command did not respond within 15 seconds.');
-
-            return self::FAILURE;
-        } catch (Throwable $e) {
-            $this->components->error("Could not start the command: {$e->getMessage()}");
-
+        if ($result === null) {
             return self::FAILURE;
         }
 
-        if ($result->exitCode() === 127) {
-            $this->components->error("Command not found: \"{$binary}\".");
-            $this->line('  Install it with: pip install -U opendataloader-pdf (or pipx, see README)');
-            $this->line('  Then set OPENDATALOADER_PDF_COMMAND to its full path if it still is not found on PATH.');
-
-            return self::FAILURE;
-        }
-
-        if ($result->failed()) {
-            $errorOutput = trim($result->errorOutput() ?: $result->output());
-
-            if (str_contains($errorOutput, 'Unable to locate a Java Runtime')
-                || str_contains($errorOutput, 'java')) {
-                $this->components->error('The CLI could not find a Java runtime (11+ required).');
-                $this->line('  Confirm it separately with: java -version');
-                $this->line("  If that works but this check still fails, set OPENDATALOADER_PDF_PATH to java's directory (e.g. `which java`).");
-
-                return self::FAILURE;
-            }
-
-            $this->components->error("Command exited with an error:\n{$errorOutput}");
-
+        if (! $this->ensureProcessSucceeded($result, $binary)) {
             return self::FAILURE;
         }
 
         $this->components->info('The CLI runs and responds to --help.');
 
-        if (! str_contains($result->output(), '--markdown-page-separator')) {
-            $this->components->warn(
-                'This CLI version does not advertise --markdown-page-separator - PdfExtractor needs it to keep physical PDF pages apart. Update with: pip install -U opendataloader-pdf'
-            );
-
+        if (! $this->ensureSeparatorFlagSupported($result)) {
             return self::FAILURE;
         }
 
@@ -101,5 +56,86 @@ class CheckCommand extends Command
         $this->components->info('opendataloader-pdf is ready.');
 
         return self::SUCCESS;
+    }
+
+    private function ensureCommandConfigured(string $binary): bool
+    {
+        if ($binary !== '') {
+            return true;
+        }
+
+        $this->components->error('OPENDATALOADER_PDF_COMMAND is empty.');
+
+        return false;
+    }
+
+    /**
+     * Runs `{$binary} --help` and reports either failure mode directly,
+     * returning null so the caller just has to check for that - mirrors
+     * PdfExtractor::runProcessOrFail()'s two-catch shape for the same
+     * reason: Process::fake() can't simulate either exception, so this
+     * stays a thin, visually-inspectable wrapper rather than something
+     * that needs to be unit-tested in isolation.
+     */
+    private function runHelpCheck(string $binary): ?ProcessResult
+    {
+        $pending = CliProcess::withExtraPath(
+            Process::timeout(15),
+            config('opendataloader-pdf.path'),
+        );
+
+        try {
+            return $pending->run([...CliProcess::splitCommand($binary), '--help']);
+        } catch (ProcessTimedOutException) {
+            $this->components->error('The command did not respond within 15 seconds.');
+
+            return null;
+        } catch (Throwable $e) {
+            $this->components->error("Could not start the command: {$e->getMessage()}");
+
+            return null;
+        }
+    }
+
+    private function ensureProcessSucceeded(ProcessResult $result, string $binary): bool
+    {
+        if ($result->exitCode() === 127) {
+            $this->components->error("Command not found: \"{$binary}\".");
+            $this->line('  Install it with: pip install -U opendataloader-pdf (or pipx, see README)');
+            $this->line('  Then set OPENDATALOADER_PDF_COMMAND to its full path if it still is not found on PATH.');
+
+            return false;
+        }
+
+        if (! $result->failed()) {
+            return true;
+        }
+
+        $errorOutput = trim($result->errorOutput() ?: $result->output());
+
+        if (str_contains($errorOutput, 'Unable to locate a Java Runtime') || str_contains($errorOutput, 'java')) {
+            $this->components->error('The CLI could not find a Java runtime (11+ required).');
+            $this->line('  Confirm it separately with: java -version');
+            $this->line("  If that works but this check still fails, set OPENDATALOADER_PDF_PATH to java's directory (e.g. `which java`).");
+
+            return false;
+        }
+
+        $this->components->error("Command exited with an error:\n{$errorOutput}");
+
+        return false;
+    }
+
+    private function ensureSeparatorFlagSupported(ProcessResult $result): bool
+    {
+        if (str_contains($result->output(), '--markdown-page-separator')) {
+            return true;
+        }
+
+        $this->components->warn(
+            'This CLI version does not advertise --markdown-page-separator - PdfExtractor needs it to keep physical PDF pages apart. Update with: pip install -U opendataloader-pdf'
+        );
+
+        return false;
     }
 }

@@ -1,0 +1,26 @@
+<?xml version="1.0"?>
+<ruleset name="opendataloader-pdf-laravel"
+         xmlns="http://pmd.sf.net/ruleset/1.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://pmd.sf.net/ruleset/1.0.0 http://pmd.sf.net/ruleset_xml_schema.xsd"
+         xsi:noNamespaceSchemaLocation="http://pmd.sf.net/ruleset_xml_schema.xsd">
+
+    <description>
+        Complexity and dead-code rules only. cleancode/design/naming are
+        deliberately left out - they're opinionated about things outside
+        this package's audited scope (static calls, boolean-only
+        conditionals, etc.) and would just add noise.
+    </description>
+
+    <rule ref="rulesets/codesize.xml">
+        <!-- 79-line CheckCommand::handle() before this audit was the
+             longest method in the package and still reads as one
+             coherent, linear checklist after being broken into guard
+             calls - length alone isn't a useful signal here once
+             cyclomatic/NPath complexity are already covered below. -->
+        <exclude name="ExcessiveMethodLength" />
+    </rule>
+
+    <rule ref="rulesets/unusedcode.xml" />
+
+</ruleset>

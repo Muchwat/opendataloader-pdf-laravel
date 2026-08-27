@@ -133,16 +133,15 @@ php artisan vendor:publish --tag=opendataloader-pdf-config
 Then set these in `.env` — everything is off until you do:
 
 ```env
-OPENDATALOADER_PDF_ENABLED=true
 OPENDATALOADER_PDF_COMMAND=/usr/local/bin/opendataloader-pdf
 # Only needed if the CLI's own internal call to `java` can't find it:
 OPENDATALOADER_PDF_PATH=
 OPENDATALOADER_PDF_TIMEOUT=120
 ```
 
-`OPENDATALOADER_PDF_ENABLED` defaults to `false` and `enabled()` also
-requires a non-empty command, so a fresh install of a host application is
-never left with a half-configured feature silently trying to run.
+`OPENDATALOADER_PDF_COMMAND` doubles as the on/off switch: it's empty by
+default, `enabled()` is true once it isn't, so a fresh install of a host
+application is never left silently trying to run an unconfigured feature.
 
 ## Quick start
 

@@ -4,31 +4,21 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Enabled
-    |--------------------------------------------------------------------------
-    |
-    | The opendataloader-pdf CLI is a separate install (pip/pipx plus a
-    | Java 11+ runtime), not a Composer dependency, so this is off by
-    | default - a host application works fully without it until this is
-    | explicitly turned on and the CLI is actually installed.
-    |
-    */
-    'enabled' => env('OPENDATALOADER_PDF_ENABLED', false),
-
-    /*
-    |--------------------------------------------------------------------------
     | Command
     |--------------------------------------------------------------------------
     |
-    | The executable to run. If it's on PATH under its default name, the
-    | bare command name is enough. In production, prefer its full resolved
-    | path (e.g. /usr/local/bin/opendataloader-pdf) - PHP-FPM's PATH is
-    | usually much smaller than an interactive login shell's, so a bare
-    | name that resolves for you at a terminal can still fail for the web
-    | server process.
+    | The executable to run. Empty by default - the opendataloader-pdf CLI
+    | is a separate install (pip/pipx plus a Java 11+ runtime), not a
+    | Composer dependency, so a host application works fully without it
+    | until this is set. This also doubles as the on/off switch: enabled()
+    | is true whenever this is non-empty. In production, prefer the
+    | command's full resolved path (e.g. /usr/local/bin/opendataloader-pdf)
+    | - PHP-FPM's PATH is usually much smaller than an interactive login
+    | shell's, so a bare name that resolves for you at a terminal can still
+    | fail for the web server process.
     |
     */
-    'command' => env('OPENDATALOADER_PDF_COMMAND', 'opendataloader-pdf'),
+    'command' => env('OPENDATALOADER_PDF_COMMAND', ''),
 
     /*
     |--------------------------------------------------------------------------

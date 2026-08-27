@@ -2,11 +2,14 @@
 
 namespace Muchwat\OpendataloaderPdf;
 
+use Illuminate\Contracts\Process\ProcessResult;
 use Illuminate\Process\Exceptions\ProcessTimedOutException;
+use Illuminate\Process\PendingProcess;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Str;
 use Muchwat\OpendataloaderPdf\Exceptions\PdfExtractionException;
+use Muchwat\OpendataloaderPdf\Support\CliProcess;
 use Throwable;
 
 /**
@@ -19,24 +22,13 @@ use Throwable;
 class PdfExtractor
 {
     /**
-     * False whenever the feature is off - including when it's turned on but
-     * left half-configured. That half-configured case is worth a log line:
-     * without one, OPENDATALOADER_PDF_ENABLED=true with an empty command
-     * just looks identical to the feature being deliberately off, with
-     * nothing anywhere to explain why the import button never shows up.
+     * True once OPENDATALOADER_PDF_COMMAND is set - that one setting is
+     * both "where's the CLI" and "is this feature on", so a fresh install
+     * with no command configured stays off with nothing else to set.
      */
     public function enabled(): bool
     {
-        $enabled = (bool) config('opendataloader-pdf.enabled');
-        $command = config('opendataloader-pdf.command');
-
-        if ($enabled && blank($command)) {
-            Log::warning('opendataloader-pdf: OPENDATALOADER_PDF_ENABLED is true but OPENDATALOADER_PDF_COMMAND is empty - extraction stays disabled until a command is configured.');
-
-            return false;
-        }
-
-        return $enabled && filled($command);
+        return filled(config('opendataloader-pdf.command'));
     }
 
     /**
@@ -58,7 +50,7 @@ class PdfExtractor
     {
         if (! $this->enabled()) {
             throw PdfExtractionException::notConfigured(
-                'PDF extraction is turned off. Set OPENDATALOADER_PDF_ENABLED=true (and OPENDATALOADER_PDF_COMMAND, if needed) in .env to turn it on.'
+                'PDF extraction is turned off. Set OPENDATALOADER_PDF_COMMAND in .env to turn it on.'
             );
         }
 
@@ -103,34 +95,50 @@ class PdfExtractor
         // marker would.
         $pageMarkerPrefix = 'OPENDATALOADER_PDF_PAGE_'.Str::random(20).'_';
         $pageMarkerSuffix = '_END';
-        $pageSeparatorTemplate = $pageMarkerPrefix.'%page-number%'.$pageMarkerSuffix;
+        $separatorTemplate = $pageMarkerPrefix.'%page-number%'.$pageMarkerSuffix;
 
-        $command = array_merge(
-            preg_split('/\s+/', $binary),
+        $command = $this->buildCommand($binary, $separatorTemplate, $pdfPath);
+        $pending = $this->preparedProcess((int) config('opendataloader-pdf.timeout', 120));
+        $result = $this->runProcessOrFail($pending, $command, $binary);
+
+        $pages = $this->parsePages($result->output(), $pageMarkerPrefix, $pageMarkerSuffix);
+
+        return $this->ensureTextExtracted($pages);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function buildCommand(string $binary, string $separatorTemplate, string $pdfPath): array
+    {
+        return array_merge(
+            CliProcess::splitCommand($binary),
             [
                 '--format', 'markdown',
                 '--to-stdout',
                 '--quiet',
                 '--image-output', 'off',
-                '--markdown-page-separator', $pageSeparatorTemplate,
+                '--markdown-page-separator', $separatorTemplate,
                 $pdfPath,
             ]
         );
+    }
 
-        $pending = Process::timeout((int) config('opendataloader-pdf.timeout', 120));
+    private function preparedProcess(int $timeout): PendingProcess
+    {
+        return CliProcess::withExtraPath(
+            Process::timeout($timeout),
+            config('opendataloader-pdf.path'),
+        );
+    }
 
-        // PHP-FPM (and most service managers) run with a much smaller PATH
-        // than an interactive shell - OPENDATALOADER_PDF_COMMAND can resolve
-        // while the CLI's own internal call to `java` still fails to find
-        // it. OPENDATALOADER_PDF_PATH lets an admin extend PATH just for
-        // this process instead of hunting down where the whole service's
-        // PATH is configured.
-        if (filled($extraPath = config('opendataloader-pdf.path'))) {
-            $pending = $pending->env([
-                'PATH' => rtrim($extraPath, ':').':'.(getenv('PATH') ?: '/usr/bin:/bin:/usr/sbin:/sbin'),
-            ]);
-        }
-
+    /**
+     * @param  list<string>  $command
+     *
+     * @throws PdfExtractionException
+     */
+    private function runProcessOrFail(PendingProcess $pending, array $command, string $binary): ProcessResult
+    {
         try {
             $result = $pending->run($command);
         } catch (ProcessTimedOutException $e) {
@@ -138,14 +146,7 @@ class PdfExtractor
                 'PDF extraction timed out before it finished - the file may be too large or complex.'
             );
         } catch (Throwable $e) {
-            Log::warning('PDF extraction command could not be started.', [
-                'command' => $binary,
-                'exception' => $e->getMessage(),
-            ]);
-
-            throw PdfExtractionException::notConfigured(
-                "Could not run the PDF extraction command \"{$binary}\". Install opendataloader-pdf (`pip install -U opendataloader-pdf`, requires Java 11+) and make sure OPENDATALOADER_PDF_COMMAND points to it."
-            );
+            throw $this->processCouldNotStart($e, $binary);
         }
 
         if ($result->exitCode() === 127) {
@@ -168,8 +169,35 @@ class PdfExtractor
             );
         }
 
-        $pages = $this->parsePages($result->output(), $pageMarkerPrefix, $pageMarkerSuffix);
+        return $result;
+    }
 
+    /**
+     * Pulled out of runProcessOrFail()'s generic catch(Throwable) arm so it's
+     * a pure function of (exception, binary name) - that makes it directly
+     * unit-testable via reflection, which the branch as a whole isn't:
+     * Process::fake() has no way to make a faked run throw.
+     */
+    private function processCouldNotStart(Throwable $e, string $binary): PdfExtractionException
+    {
+        Log::warning('PDF extraction command could not be started.', [
+            'command' => $binary,
+            'exception' => $e->getMessage(),
+        ]);
+
+        return PdfExtractionException::notConfigured(
+            "Could not run the PDF extraction command \"{$binary}\". Install opendataloader-pdf (`pip install -U opendataloader-pdf`, requires Java 11+) and make sure OPENDATALOADER_PDF_COMMAND points to it."
+        );
+    }
+
+    /**
+     * @param  list<string>  $pages
+     * @return list<string>
+     *
+     * @throws PdfExtractionException
+     */
+    private function ensureTextExtracted(array $pages): array
+    {
         if (! collect($pages)->contains(fn (string $page) => $page !== '')) {
             throw PdfExtractionException::failed(
                 'No text could be extracted from this PDF - it may be a scanned/image-only document.'

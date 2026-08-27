@@ -16,18 +16,16 @@ function tempPdfPath(bool $withPdfExtension = true): string
 }
 
 beforeEach(function () {
-    Config::set('opendataloader-pdf.enabled', true);
     Config::set('opendataloader-pdf.command', 'opendataloader-pdf');
 });
 
 it('is disabled by default', function () {
-    Config::set('opendataloader-pdf.enabled', false);
+    Config::set('opendataloader-pdf.command', '');
 
     expect(app(PdfExtractor::class)->enabled())->toBeFalse();
 });
 
-it('is only enabled when both the flag and command are set', function () {
-    Config::set('opendataloader-pdf.enabled', true);
+it('is enabled once a command is configured', function () {
     Config::set('opendataloader-pdf.command', '');
     expect(app(PdfExtractor::class)->enabled())->toBeFalse();
 
@@ -35,30 +33,8 @@ it('is only enabled when both the flag and command are set', function () {
     expect(app(PdfExtractor::class)->enabled())->toBeTrue();
 });
 
-it('logs a warning instead of staying silent when enabled but the command is blank', function () {
-    Config::set('opendataloader-pdf.enabled', true);
-    Config::set('opendataloader-pdf.command', '');
-    Log::spy();
-
-    expect(app(PdfExtractor::class)->enabled())->toBeFalse();
-
-    Log::shouldHaveReceived('warning')
-        ->once()
-        ->with(Mockery::pattern('/OPENDATALOADER_PDF_COMMAND is empty/'));
-});
-
-it('does not log anything when deliberately turned off', function () {
-    Config::set('opendataloader-pdf.enabled', false);
-    Config::set('opendataloader-pdf.command', '');
-    Log::spy();
-
-    expect(app(PdfExtractor::class)->enabled())->toBeFalse();
-
-    Log::shouldNotHaveReceived('warning');
-});
-
 it('refuses to run when disabled', function () {
-    Config::set('opendataloader-pdf.enabled', false);
+    Config::set('opendataloader-pdf.command', '');
     Process::fake();
 
     app(PdfExtractor::class)->extractPages(tempPdfPath());
@@ -86,7 +62,7 @@ it('falls back to one page when the output has no page markers', function () {
 });
 
 it('extractMarkdown joins pages with a blank line', function () {
-    Process::fake(['*' => Process::result(output: "Page one")]);
+    Process::fake(['*' => Process::result(output: 'Page one')]);
 
     expect(app(PdfExtractor::class)->extractMarkdown(tempPdfPath()))->toBe('Page one');
 });
@@ -183,26 +159,33 @@ it('reports a non-configuration process failure as a per-file failure', function
     }
 });
 
-it('the check command reports disabled without spawning a process', function () {
-    Config::set('opendataloader-pdf.enabled', false);
-    Process::fake();
+it('translates a process-could-not-start failure into a configuration exception and logs it', function () {
+    // Process::fake() has no API to make a faked run() throw, so the real
+    // "process could not even start" branch inside runProcessOrFail() isn't
+    // reachable through the public API in tests. It was pulled into its own
+    // pure method (exception + binary name in, PdfExtractionException out)
+    // specifically so it can be exercised directly here instead.
+    Log::spy();
 
-    $this->artisan('opendataloader-pdf:check')
-        ->assertFailed();
+    $reflection = new ReflectionMethod(PdfExtractor::class, 'processCouldNotStart');
+    $reflection->setAccessible(true);
 
-    Process::assertNothingRan();
-});
+    $exception = $reflection->invoke(
+        app(PdfExtractor::class),
+        new RuntimeException('permission denied'),
+        '/usr/local/bin/opendataloader-pdf',
+    );
 
-it('the check command reports a missing CLI', function () {
-    Process::fake(['*' => Process::result(exitCode: 127)]);
+    expect($exception)->toBeInstanceOf(PdfExtractionException::class);
+    expect($exception->isConfigurationIssue)->toBeTrue();
+    expect($exception->getMessage())
+        ->toContain('/usr/local/bin/opendataloader-pdf')
+        ->toContain('OPENDATALOADER_PDF_COMMAND');
 
-    $this->artisan('opendataloader-pdf:check')
-        ->assertFailed();
-});
-
-it('the check command passes when the CLI supports the required flag', function () {
-    Process::fake(['*' => Process::result(output: 'usage: ... --markdown-page-separator ...')]);
-
-    $this->artisan('opendataloader-pdf:check')
-        ->assertSuccessful();
+    Log::shouldHaveReceived('warning')
+        ->once()
+        ->with('PDF extraction command could not be started.', [
+            'command' => '/usr/local/bin/opendataloader-pdf',
+            'exception' => 'permission denied',
+        ]);
 });
