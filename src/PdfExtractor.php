@@ -18,10 +18,25 @@ use Throwable;
  */
 class PdfExtractor
 {
+    /**
+     * False whenever the feature is off - including when it's turned on but
+     * left half-configured. That half-configured case is worth a log line:
+     * without one, OPENDATALOADER_PDF_ENABLED=true with an empty command
+     * just looks identical to the feature being deliberately off, with
+     * nothing anywhere to explain why the import button never shows up.
+     */
     public function enabled(): bool
     {
-        return (bool) config('opendataloader-pdf.enabled')
-            && filled(config('opendataloader-pdf.command'));
+        $enabled = (bool) config('opendataloader-pdf.enabled');
+        $command = config('opendataloader-pdf.command');
+
+        if ($enabled && blank($command)) {
+            Log::warning('opendataloader-pdf: OPENDATALOADER_PDF_ENABLED is true but OPENDATALOADER_PDF_COMMAND is empty - extraction stays disabled until a command is configured.');
+
+            return false;
+        }
+
+        return $enabled && filled($command);
     }
 
     /**

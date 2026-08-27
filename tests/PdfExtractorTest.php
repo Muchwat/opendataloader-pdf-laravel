@@ -1,6 +1,7 @@
 <?php
 
 use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Str;
 use Muchwat\OpendataloaderPdf\Exceptions\PdfExtractionException;
@@ -32,6 +33,28 @@ it('is only enabled when both the flag and command are set', function () {
 
     Config::set('opendataloader-pdf.command', 'opendataloader-pdf');
     expect(app(PdfExtractor::class)->enabled())->toBeTrue();
+});
+
+it('logs a warning instead of staying silent when enabled but the command is blank', function () {
+    Config::set('opendataloader-pdf.enabled', true);
+    Config::set('opendataloader-pdf.command', '');
+    Log::spy();
+
+    expect(app(PdfExtractor::class)->enabled())->toBeFalse();
+
+    Log::shouldHaveReceived('warning')
+        ->once()
+        ->with(Mockery::pattern('/OPENDATALOADER_PDF_COMMAND is empty/'));
+});
+
+it('does not log anything when deliberately turned off', function () {
+    Config::set('opendataloader-pdf.enabled', false);
+    Config::set('opendataloader-pdf.command', '');
+    Log::spy();
+
+    expect(app(PdfExtractor::class)->enabled())->toBeFalse();
+
+    Log::shouldNotHaveReceived('warning');
 });
 
 it('refuses to run when disabled', function () {

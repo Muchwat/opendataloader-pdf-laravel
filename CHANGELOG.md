@@ -2,6 +2,15 @@
 
 All notable changes to this package are documented here.
 
+## [1.0.1] - 2026-08-27
+
+### Fixed
+
+- `enabled()` now logs a warning (`opendataloader-pdf: OPENDATALOADER_PDF_ENABLED is true but OPENDATALOADER_PDF_COMMAND is empty...`)
+  when the feature is turned on but left half-configured, instead of
+  silently returning `false` with nothing anywhere to explain why. A
+  deliberately-off feature (`enabled: false`) still logs nothing, as before.
+
 ## [1.0.0] - 2026-08-27
 
 ### Added
