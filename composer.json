@@ -1,0 +1,54 @@
+{
+    "name": "muchwat/opendataloader-pdf-laravel",
+    "description": "Laravel wrapper around the opendataloader-pdf CLI: turn a PDF into Markdown, one string per physical page, via Laravel's Process facade.",
+    "type": "library",
+    "license": "MIT",
+    "keywords": ["laravel", "pdf", "markdown", "opendataloader", "opendataloader-pdf", "extraction", "converter"],
+    "homepage": "https://github.com/Muchwat/opendataloader-pdf-laravel",
+    "authors": [
+        {
+            "name": "Kevin Muchwat",
+            "email": "kevinmuchwat@gmail.com"
+        }
+    ],
+    "require": {
+        "php": "^8.2",
+        "illuminate/console": "^10.0|^11.0|^12.0|^13.0",
+        "illuminate/process": "^10.0|^11.0|^12.0|^13.0",
+        "illuminate/support": "^10.0|^11.0|^12.0|^13.0"
+    },
+    "require-dev": {
+        "orchestra/testbench": "^8.0|^9.0|^10.0|^11.0",
+        "pestphp/pest": "^2.0|^3.0|^4.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Muchwat\\OpendataloaderPdf\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Muchwat\\OpendataloaderPdf\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Muchwat\\OpendataloaderPdf\\OpendataloaderPdfServiceProvider"
+            ],
+            "aliases": {
+                "OpendataloaderPdf": "Muchwat\\OpendataloaderPdf\\Facades\\OpendataloaderPdf"
+            }
+        }
+    },
+    "scripts": {
+        "test": "pest"
+    },
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
+        }
+    },
+    "minimum-stability": "stable"
+}
