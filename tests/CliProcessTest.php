@@ -70,14 +70,20 @@ it('prepends the extra path to PATH when one is configured', function () {
         ->run(['true']);
 
     Process::assertRan(function ($process) {
-        return str_starts_with($process->environment['PATH'] ?? '', '/usr/local/opt/openjdk/bin:');
+        return str_starts_with(
+            $process->environment['PATH'] ?? '',
+            '/usr/local/opt/openjdk/bin'.PATH_SEPARATOR,
+        );
     });
 });
 
-it('strips a trailing colon from the extra path before prepending it', function () {
+it('strips a trailing platform separator from the extra path before prepending it', function () {
     Process::fake(['*' => Process::result(output: 'ok')]);
 
-    CliProcess::withExtraPath(Process::timeout(5), '/usr/local/opt/openjdk/bin:')
+    CliProcess::withExtraPath(
+        Process::timeout(5),
+        '/usr/local/opt/openjdk/bin'.PATH_SEPARATOR,
+    )
         ->run(['true']);
 
     Process::assertRan(function ($process) {
@@ -85,7 +91,10 @@ it('strips a trailing colon from the extra path before prepending it', function 
             $process->environment['PATH'] ?? '',
             '/usr/local/opt/openjdk/bin'.PATH_SEPARATOR,
         )
-            && ! str_contains($process->environment['PATH'], 'bin::');
+            && ! str_contains(
+                $process->environment['PATH'],
+                'bin'.PATH_SEPARATOR.PATH_SEPARATOR,
+            );
     });
 });
 

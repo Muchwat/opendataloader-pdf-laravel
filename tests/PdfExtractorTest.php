@@ -211,7 +211,7 @@ it('rejects an unreadable PDF before spawning a process', function () {
 it('passes the exact configured argv timeout and PATH environment to the process', function () {
     Config::set('opendataloader-pdf.command', 'python -m opendataloader_pdf');
     Config::set('opendataloader-pdf.timeout', 37);
-    Config::set('opendataloader-pdf.path', '/opt/java/bin:');
+    Config::set('opendataloader-pdf.path', '/opt/java/bin'.PATH_SEPARATOR);
 
     $observed = null;
     Process::fake(function ($process) use (&$observed) {
@@ -228,6 +228,11 @@ it('passes the exact configured argv timeout and PATH environment to the process
     app(PdfExtractor::class)->extractPages($pdfPath);
 
     $separator = $observed['command'][10];
+
+    $defaultPath = PHP_OS_FAMILY === 'Windows'
+        ? (getenv('SystemRoot') ?: 'C:\\Windows').'\\System32'
+        : implode(PATH_SEPARATOR, ['/usr/bin', '/bin', '/usr/sbin', '/sbin']);
+    $currentPath = getenv('PATH') ?: $defaultPath;
 
     expect($separator)->toMatch('/^OPENDATALOADER_PDF_PAGE_[A-Za-z0-9]{20}_%page-number%_END$/')
         ->and($observed['command'])->toBe([
@@ -246,7 +251,7 @@ it('passes the exact configured argv timeout and PATH environment to the process
         ])
         ->and($observed['timeout'])->toBe(37)
         ->and($observed['environment'])->toBe([
-            'PATH' => '/opt/java/bin:'.(getenv('PATH') ?: '/usr/bin:/bin:/usr/sbin:/sbin'),
+            'PATH' => '/opt/java/bin'.PATH_SEPARATOR.$currentPath,
         ]);
 });
 
