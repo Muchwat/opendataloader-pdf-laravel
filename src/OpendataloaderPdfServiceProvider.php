@@ -1,9 +1,12 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Muchwat\OpendataloaderPdf;
 
 use Illuminate\Support\ServiceProvider;
 use Muchwat\OpendataloaderPdf\Console\CheckCommand;
+use Muchwat\OpendataloaderPdf\Contracts\PdfExtractor as PdfExtractorContract;
 
 class OpendataloaderPdfServiceProvider extends ServiceProvider
 {
@@ -12,7 +15,11 @@ class OpendataloaderPdfServiceProvider extends ServiceProvider
         $this->mergeConfigFrom(__DIR__.'/../config/opendataloader-pdf.php', 'opendataloader-pdf');
 
         $this->app->singleton(PdfExtractor::class, fn () => new PdfExtractor);
-        $this->app->alias(PdfExtractor::class, 'opendataloader-pdf');
+        $this->app->singleton(
+            PdfExtractorContract::class,
+            fn ($app) => $app->make(PdfExtractor::class),
+        );
+        $this->app->alias(PdfExtractorContract::class, 'opendataloader-pdf');
     }
 
     public function boot(): void

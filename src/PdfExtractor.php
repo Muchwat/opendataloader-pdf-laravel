@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Muchwat\OpendataloaderPdf;
 
 use Illuminate\Contracts\Process\ProcessResult;
@@ -8,6 +10,7 @@ use Illuminate\Process\PendingProcess;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Str;
+use Muchwat\OpendataloaderPdf\Contracts\PdfExtractor as PdfExtractorContract;
 use Muchwat\OpendataloaderPdf\Exceptions\PdfExtractionException;
 use Muchwat\OpendataloaderPdf\Support\CliProcess;
 use Throwable;
@@ -19,7 +22,7 @@ use Throwable;
  * and config/opendataloader-pdf.php for the enabled/command/path/timeout
  * options this class reads.
  */
-class PdfExtractor
+class PdfExtractor implements PdfExtractorContract
 {
     /**
      * True once OPENDATALOADER_PDF_COMMAND is set - that one setting is

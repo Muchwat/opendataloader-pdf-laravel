@@ -4,6 +4,7 @@ use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\ServiceProvider;
 use Muchwat\OpendataloaderPdf\Console\CheckCommand;
+use Muchwat\OpendataloaderPdf\Contracts\PdfExtractor as PdfExtractorContract;
 use Muchwat\OpendataloaderPdf\Facades\OpendataloaderPdf;
 use Muchwat\OpendataloaderPdf\OpendataloaderPdfServiceProvider;
 use Muchwat\OpendataloaderPdf\PdfExtractor;
@@ -35,9 +36,37 @@ it('resolves the concrete class string alias and facade to one singleton', funct
 
     $concrete = app(PdfExtractor::class);
 
-    expect(app('opendataloader-pdf'))->toBe($concrete)
+    expect(app(PdfExtractorContract::class))->toBe($concrete)
+        ->and(app('opendataloader-pdf'))->toBe($concrete)
         ->and(OpendataloaderPdf::getFacadeRoot())->toBe($concrete)
         ->and(app(PdfExtractor::class))->toBe($concrete);
+});
+
+it('allows the contract and facade implementation to be replaced together', function () {
+    $replacement = new class implements PdfExtractorContract
+    {
+        public function enabled(): bool
+        {
+            return true;
+        }
+
+        public function extractMarkdown(string $pdfPath): string
+        {
+            return 'replacement markdown';
+        }
+
+        public function extractPages(string $pdfPath): array
+        {
+            return ['replacement page'];
+        }
+    };
+
+    app()->instance(PdfExtractorContract::class, $replacement);
+    OpendataloaderPdf::clearResolvedInstance('opendataloader-pdf');
+
+    expect(app('opendataloader-pdf'))->toBe($replacement)
+        ->and(OpendataloaderPdf::getFacadeRoot())->toBe($replacement)
+        ->and(OpendataloaderPdf::extractPages('/unused.pdf'))->toBe(['replacement page']);
 });
 
 it('publishes the configuration under the public package tag', function () {
