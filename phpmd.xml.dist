@@ -13,11 +13,8 @@
     </description>
 
     <rule ref="rulesets/codesize.xml">
-        <!-- 79-line CheckCommand::handle() before this audit was the
-             longest method in the package and still reads as one
-             coherent, linear checklist after being broken into guard
-             calls - length alone isn't a useful signal here once
-             cyclomatic/NPath complexity are already covered below. -->
+        <!-- Method length alone is not a useful architectural signal once
+             cyclomatic and NPath complexity are enforced. -->
         <exclude name="ExcessiveMethodLength" />
     </rule>
 

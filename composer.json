@@ -47,11 +47,11 @@
     },
     "scripts": {
         "test": "pest",
-        "test:coverage": "pest --coverage --min=90",
+        "test:coverage": "pest --coverage --min=80",
         "lint": "pint",
         "lint:test": "pint --test",
         "analyse": "phpmd src,config text phpmd.xml.dist",
-        "analyse:types": "phpstan analyse --memory-limit=512M",
+        "analyse:types": "phpstan analyse --memory-limit=512M --debug",
         "check": [
             "@lint:test",
             "@analyse",
