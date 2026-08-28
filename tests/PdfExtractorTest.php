@@ -1,18 +1,18 @@
 <?php
 
+use Illuminate\Process\Exceptions\ProcessTimedOutException;
+use Illuminate\Process\PendingProcess;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Process;
-use Illuminate\Support\Str;
 use Muchwat\OpendataloaderPdf\Exceptions\PdfExtractionException;
 use Muchwat\OpendataloaderPdf\PdfExtractor;
+use Symfony\Component\Process\Exception\ProcessTimedOutException as SymfonyProcessTimedOutException;
+use Symfony\Component\Process\Process as SymfonyProcess;
 
 function tempPdfPath(bool $withPdfExtension = true): string
 {
-    $path = sys_get_temp_dir().'/'.Str::uuid().($withPdfExtension ? '.pdf' : '');
-    file_put_contents($path, '%PDF-1.4 fake content for tests');
-
-    return $path;
+    return test()->temporaryPdfPath($withPdfExtension);
 }
 
 beforeEach(function () {
@@ -37,8 +37,18 @@ it('refuses to run when disabled', function () {
     Config::set('opendataloader-pdf.command', '');
     Process::fake();
 
-    app(PdfExtractor::class)->extractPages(tempPdfPath());
-})->throws(PdfExtractionException::class);
+    try {
+        app(PdfExtractor::class)->extractPages(tempPdfPath());
+        test()->fail('Expected a PdfExtractionException.');
+    } catch (PdfExtractionException $exception) {
+        expect($exception->isConfigurationIssue)->toBeTrue()
+            ->and($exception->getMessage())->toBe(
+                'PDF extraction is turned off. Set OPENDATALOADER_PDF_COMMAND in .env to turn it on.'
+            );
+    }
+
+    Process::assertNothingRan();
+});
 
 it('rejects a missing file without spawning a process', function () {
     Process::fake();
@@ -47,7 +57,8 @@ it('rejects a missing file without spawning a process', function () {
         app(PdfExtractor::class)->extractPages('/no/such/file.pdf');
         $this->fail('Expected a PdfExtractionException.');
     } catch (PdfExtractionException $e) {
-        expect($e->isConfigurationIssue)->toBeFalse();
+        expect($e->isConfigurationIssue)->toBeFalse()
+            ->and($e->getMessage())->toBe('PDF file not found at [/no/such/file.pdf].');
     }
 
     Process::assertNothingRan();
@@ -126,16 +137,70 @@ it('rejects marker-only output where every page is blank', function () {
 });
 
 it('hands the CLI a .pdf-suffixed path, not an extensionless one', function () {
-    Process::fake(['*' => Process::result(output: '# Title')]);
+    $workingPath = null;
 
-    app(PdfExtractor::class)->extractPages(tempPdfPath(withPdfExtension: false));
+    Process::fake(function ($process) use (&$workingPath) {
+        $workingPath = end($process->command);
 
-    Process::assertRan(function ($process) {
-        return str_ends_with((string) end($process->command), '.pdf');
+        expect(is_file($workingPath))->toBeTrue()
+            ->and(file_get_contents($workingPath))->toBe('%PDF-1.4 fake content for tests');
+
+        return Process::result(output: '# Title');
     });
+
+    $inputPath = tempPdfPath(withPdfExtension: false);
+
+    app(PdfExtractor::class)->extractPages($inputPath);
+
+    expect($workingPath)->not->toBe($inputPath)
+        ->and($workingPath)->toEndWith('.pdf')
+        ->and(is_file($workingPath))->toBeFalse();
+});
+
+it('passes the exact configured argv timeout and PATH environment to the process', function () {
+    Config::set('opendataloader-pdf.command', 'python -m opendataloader_pdf');
+    Config::set('opendataloader-pdf.timeout', 37);
+    Config::set('opendataloader-pdf.path', '/opt/java/bin:');
+
+    $observed = null;
+    Process::fake(function ($process) use (&$observed) {
+        $observed = [
+            'command' => $process->command,
+            'timeout' => $process->timeout,
+            'environment' => $process->environment,
+        ];
+
+        return Process::result(output: '# Title');
+    });
+
+    $pdfPath = tempPdfPath();
+    app(PdfExtractor::class)->extractPages($pdfPath);
+
+    $separator = $observed['command'][10];
+
+    expect($separator)->toMatch('/^OPENDATALOADER_PDF_PAGE_[A-Za-z0-9]{20}_%page-number%_END$/')
+        ->and($observed['command'])->toBe([
+            'python',
+            '-m',
+            'opendataloader_pdf',
+            '--format',
+            'markdown',
+            '--to-stdout',
+            '--quiet',
+            '--image-output',
+            'off',
+            '--markdown-page-separator',
+            $separator,
+            $pdfPath,
+        ])
+        ->and($observed['timeout'])->toBe(37)
+        ->and($observed['environment'])->toBe([
+            'PATH' => '/opt/java/bin:'.(getenv('PATH') ?: '/usr/bin:/bin:/usr/sbin:/sbin'),
+        ]);
 });
 
 it('reports a missing CLI as a configuration issue', function () {
+    Log::spy();
     Process::fake(['*' => Process::result(exitCode: 127, errorOutput: 'command not found')]);
 
     try {
@@ -145,18 +210,87 @@ it('reports a missing CLI as a configuration issue', function () {
         expect($e->isConfigurationIssue)->toBeTrue();
         expect($e->getMessage())->toContain('OPENDATALOADER_PDF_COMMAND');
     }
+
+    Log::shouldHaveReceived('warning')
+        ->once()
+        ->with('PDF extraction command not found.', [
+            'command' => 'opendataloader-pdf',
+        ]);
 });
 
 it('reports a non-configuration process failure as a per-file failure', function () {
-    Process::fake(['*' => Process::result(exitCode: 1, errorOutput: 'malformed PDF structure')]);
+    Log::spy();
+    Process::fake(['*' => Process::result(exitCode: 42, errorOutput: ' malformed PDF structure ')]);
 
     try {
         app(PdfExtractor::class)->extractPages(tempPdfPath());
         test()->fail('Expected a PdfExtractionException.');
     } catch (PdfExtractionException $e) {
         expect($e->isConfigurationIssue)->toBeFalse();
-        expect($e->getMessage())->toContain('malformed PDF structure');
+        expect($e->getMessage())->toBe('PDF extraction failed: malformed PDF structure');
     }
+
+    Log::shouldHaveReceived('warning')
+        ->once()
+        ->with('PDF extraction failed.', [
+            'command' => 'opendataloader-pdf',
+            'exit_code' => 42,
+            'stderr' => " malformed PDF structure \n",
+        ]);
+});
+
+it('uses standard output in the exception when a failed process has no stderr', function () {
+    Log::spy();
+    Process::fake(['*' => Process::result(exitCode: 1, output: ' failure was printed to stdout ')]);
+
+    try {
+        app(PdfExtractor::class)->extractPages(tempPdfPath());
+        test()->fail('Expected a PdfExtractionException.');
+    } catch (PdfExtractionException $exception) {
+        expect($exception->isConfigurationIssue)->toBeFalse()
+            ->and($exception->getMessage())->toBe('PDF extraction failed: failure was printed to stdout');
+    }
+
+    Log::shouldHaveReceived('warning')
+        ->once()
+        ->with('PDF extraction failed.', [
+            'command' => 'opendataloader-pdf',
+            'exit_code' => 1,
+            'stderr' => '',
+        ]);
+});
+
+it('currently classifies a process timeout as a per-file failure without logging it', function () {
+    Config::set('opendataloader-pdf.timeout', 19);
+    Log::spy();
+
+    $result = Process::result();
+    $symfonyProcess = new SymfonyProcess(['opendataloader-pdf']);
+    $symfonyProcess->setTimeout(19);
+    $timeout = new ProcessTimedOutException(
+        new SymfonyProcessTimedOutException(
+            $symfonyProcess,
+            SymfonyProcessTimedOutException::TYPE_GENERAL,
+        ),
+        $result,
+    );
+
+    $pending = Mockery::mock(PendingProcess::class);
+    $pending->shouldReceive('run')->once()->andThrow($timeout);
+    Process::shouldReceive('timeout')->once()->with(19)->andReturn($pending);
+
+    try {
+        app(PdfExtractor::class)->extractPages(tempPdfPath());
+        test()->fail('Expected a PdfExtractionException.');
+    } catch (PdfExtractionException $exception) {
+        expect($exception->isConfigurationIssue)->toBeFalse()
+            ->and($exception->getMessage())->toBe(
+                'PDF extraction timed out before it finished - the file may be too large or complex.'
+            )
+            ->and($exception->getPrevious())->toBeNull();
+    }
+
+    Log::shouldNotHaveReceived('warning');
 });
 
 it('translates a process-could-not-start failure into a configuration exception and logs it', function () {
