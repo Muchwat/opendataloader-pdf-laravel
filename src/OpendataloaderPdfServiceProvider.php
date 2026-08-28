@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Muchwat\OpendataloaderPdf;
 
 use Illuminate\Contracts\Config\Repository;
+use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Process\Factory;
 use Illuminate\Support\ServiceProvider;
 use Muchwat\OpendataloaderPdf\Console\CheckCommand;
@@ -23,7 +24,7 @@ class OpendataloaderPdfServiceProvider extends ServiceProvider
         $this->app->singleton(PageOutputParser::class);
         $this->app->singleton(
             OpendataloaderCli::class,
-            fn ($app) => new OpendataloaderCli(
+            fn (Application $app) => new OpendataloaderCli(
                 $app->make(Repository::class),
                 $app->make(Factory::class),
                 $app->make(LoggerInterface::class),
@@ -31,7 +32,7 @@ class OpendataloaderPdfServiceProvider extends ServiceProvider
         );
         $this->app->singleton(
             PdfExtractor::class,
-            fn ($app) => new PdfExtractor(
+            fn (Application $app) => new PdfExtractor(
                 $app->make(Repository::class),
                 $app->make(OpendataloaderCli::class),
                 $app->make(PageOutputParser::class),
@@ -40,7 +41,7 @@ class OpendataloaderPdfServiceProvider extends ServiceProvider
         );
         $this->app->singleton(
             PdfExtractorContract::class,
-            fn ($app) => $app->make(PdfExtractor::class),
+            fn (Application $app) => $app->make(PdfExtractor::class),
         );
         $this->app->alias(PdfExtractorContract::class, 'opendataloader-pdf');
     }

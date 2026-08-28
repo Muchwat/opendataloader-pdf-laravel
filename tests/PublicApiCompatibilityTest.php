@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Process;
 use Muchwat\OpendataloaderPdf\Exceptions\PdfExtractionException;

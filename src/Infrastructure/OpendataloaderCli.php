@@ -9,6 +9,7 @@ use Illuminate\Contracts\Process\ProcessResult;
 use Illuminate\Process\Exceptions\ProcessTimedOutException;
 use Illuminate\Process\Factory;
 use Illuminate\Process\PendingProcess;
+use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Str;
@@ -35,7 +36,7 @@ final class OpendataloaderCli
     {
         $process = Process::getFacadeRoot();
         $logger = Log::getFacadeRoot();
-        $configuration = config();
+        $configuration = Config::getFacadeRoot();
 
         if (! $configuration instanceof Repository
             || ! $process instanceof Factory
@@ -82,7 +83,7 @@ final class OpendataloaderCli
         $binary = $this->command();
         $timeout = $this->extractionTimeout();
         $command = $this->buildExtractionCommand($binary, $separatorTemplate, $pdfPath);
-        $pending = CliProcess::withExtraPath($this->process->timeout($timeout), $this->extraPath());
+        $pending = CliProcess::withExtraPath($this->pendingProcess($timeout), $this->extraPath());
         $result = $this->runProcess(
             $pending,
             $command,
@@ -115,7 +116,7 @@ final class OpendataloaderCli
     {
         $binary = $this->command();
         $command = [...$this->commandArguments($binary), '--help'];
-        $pending = CliProcess::withExtraPath($this->process->timeout($timeout), $this->extraPath());
+        $pending = CliProcess::withExtraPath($this->pendingProcess($timeout), $this->extraPath());
         $result = $this->runProcess(
             $pending,
             $command,
@@ -255,6 +256,11 @@ final class OpendataloaderCli
         }
 
         return $path;
+    }
+
+    private function pendingProcess(int $timeout): PendingProcess
+    {
+        return $this->process->newPendingProcess()->timeout($timeout);
     }
 
     /** @return list<string> */

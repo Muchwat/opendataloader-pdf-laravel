@@ -335,8 +335,9 @@ it('classifies a process timeout as a chained configuration failure and logs it'
     );
 
     $pending = Mockery::mock(PendingProcess::class);
+    $pending->shouldReceive('timeout')->once()->with(19)->andReturnSelf();
     $pending->shouldReceive('run')->once()->andThrow($timeout);
-    Process::shouldReceive('timeout')->once()->with(19)->andReturn($pending);
+    Process::shouldReceive('newPendingProcess')->once()->andReturn($pending);
 
     try {
         app(PdfExtractor::class)->extractPages(tempPdfPath());
@@ -363,8 +364,9 @@ it('translates a process-could-not-start failure through the public API and logs
 
     $cause = new RuntimeException('permission denied');
     $pending = Mockery::mock(PendingProcess::class);
+    $pending->shouldReceive('timeout')->once()->with(120)->andReturnSelf();
     $pending->shouldReceive('run')->once()->andThrow($cause);
-    Process::shouldReceive('timeout')->once()->with(120)->andReturn($pending);
+    Process::shouldReceive('newPendingProcess')->once()->andReturn($pending);
 
     Config::set('opendataloader-pdf.command', '/usr/local/bin/opendataloader-pdf');
 

@@ -1,9 +1,11 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Muchwat\OpendataloaderPdf\Facades;
 
 use Illuminate\Support\Facades\Facade;
-use Muchwat\OpendataloaderPdf\PdfExtractor;
+use Muchwat\OpendataloaderPdf\Contracts\PdfExtractor;
 
 /**
  * @method static bool enabled()

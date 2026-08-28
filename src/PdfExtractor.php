@@ -181,6 +181,8 @@ class PdfExtractor implements PdfExtractorContract
     }
 
     /**
+     * @return list<string>
+     *
      * @throws PdfExtractionException
      */
     protected function runExtraction(string $pdfPath): array
