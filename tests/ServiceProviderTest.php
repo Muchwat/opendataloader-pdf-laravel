@@ -72,14 +72,17 @@ it('allows the contract and facade implementation to be replaced together', func
 });
 
 it('publishes the configuration under the public package tag', function () {
-    $packageConfig = dirname(__DIR__).'/src/../config/opendataloader-pdf.php';
-
-    expect(ServiceProvider::pathsToPublish(
+    $published = ServiceProvider::pathsToPublish(
         OpendataloaderPdfServiceProvider::class,
         'opendataloader-pdf-config',
-    ))->toBe([
-        $packageConfig => config_path('opendataloader-pdf.php'),
-    ]);
+    );
+    $packageConfig = array_key_first($published);
+
+    expect($published)->toHaveCount(1)
+        ->and(realpath($packageConfig))->toBe(
+            realpath(dirname(__DIR__).'/config/opendataloader-pdf.php'),
+        )
+        ->and($published[$packageConfig])->toBe(config_path('opendataloader-pdf.php'));
 });
 
 it('registers the public diagnostic artisan command', function () {
