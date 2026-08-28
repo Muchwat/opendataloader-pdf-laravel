@@ -1,8 +1,11 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Muchwat\OpendataloaderPdf\Exceptions;
 
 use RuntimeException;
+use Throwable;
 
 /**
  * Thrown by PdfExtractor. $isConfigurationIssue distinguishes a server setup
@@ -14,18 +17,21 @@ use RuntimeException;
  */
 class PdfExtractionException extends RuntimeException
 {
-    protected function __construct(string $message, public readonly bool $isConfigurationIssue)
-    {
-        parent::__construct($message);
+    protected function __construct(
+        string $message,
+        public readonly bool $isConfigurationIssue,
+        ?Throwable $previous = null,
+    ) {
+        parent::__construct($message, 0, $previous);
     }
 
-    public static function notConfigured(string $message): self
+    public static function notConfigured(string $message, ?Throwable $previous = null): self
     {
-        return new self($message, true);
+        return new PdfConfigurationException($message, $previous);
     }
 
-    public static function failed(string $message): self
+    public static function failed(string $message, ?Throwable $previous = null): self
     {
-        return new self($message, false);
+        return new PdfProcessingException($message, $previous);
     }
 }
