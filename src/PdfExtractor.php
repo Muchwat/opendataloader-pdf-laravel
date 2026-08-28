@@ -20,7 +20,7 @@ use Throwable;
  * Wraps the opendataloader-pdf CLI (https://github.com/opendataloader-project/opendataloader-pdf)
  * to turn a PDF into Markdown. The CLI is a separate install (pip/pipx plus
  * a Java 11+ runtime), not a Composer dependency - see the README for setup
- * and config/opendataloader-pdf.php for the enabled/command/path/timeout
+ * and config/opendataloader-pdf.php for the command/path/timeout
  * options this class reads.
  */
 class PdfExtractor implements PdfExtractorContract
@@ -124,13 +124,7 @@ class PdfExtractor implements PdfExtractorContract
             [$temporaryPath, $target] = $this->openTemporaryPdf();
 
             try {
-                try {
-                    if (stream_copy_to_stream($source, $target) === false) {
-                        throw PdfExtractionException::failed('Could not prepare the PDF for extraction.');
-                    }
-                } finally {
-                    fclose($target);
-                }
+                $this->writeTemporaryPdf($source, $target);
             } catch (Throwable $exception) {
                 $this->removeTemporaryPdf($temporaryPath);
 
@@ -141,6 +135,23 @@ class PdfExtractor implements PdfExtractorContract
         }
 
         return $temporaryPath;
+    }
+
+    /**
+     * @param  resource  $source
+     * @param  resource  $target
+     *
+     * @throws PdfExtractionException
+     */
+    private function writeTemporaryPdf($source, $target): void
+    {
+        try {
+            if (stream_copy_to_stream($source, $target) === false) {
+                throw PdfExtractionException::failed('Could not prepare the PDF for extraction.');
+            }
+        } finally {
+            fclose($target);
+        }
     }
 
     /** @return array{0: string, 1: resource} */
@@ -157,11 +168,15 @@ class PdfExtractor implements PdfExtractorContract
 
         $handle = @fopen($path, 'x+b');
 
-        if ($handle === false || ! @chmod($path, 0600)) {
-            if (is_resource($handle)) {
-                fclose($handle);
-                $this->removeTemporaryPdf($path);
-            }
+        if ($handle === false) {
+            throw PdfExtractionException::notConfigured(
+                'Could not create a private temporary file for PDF extraction. Check the system temporary directory.'
+            );
+        }
+
+        if (PHP_OS_FAMILY !== 'Windows' && ! @chmod($path, 0600)) {
+            fclose($handle);
+            $this->removeTemporaryPdf($path);
 
             throw PdfExtractionException::notConfigured(
                 'Could not create a private temporary file for PDF extraction. Check the system temporary directory.'
