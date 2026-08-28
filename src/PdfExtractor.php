@@ -4,17 +4,14 @@ declare(strict_types=1);
 
 namespace Muchwat\OpendataloaderPdf;
 
-use Illuminate\Contracts\Process\ProcessResult;
-use Illuminate\Process\Exceptions\ProcessTimedOutException;
-use Illuminate\Process\PendingProcess;
-use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Process;
+use Illuminate\Contracts\Config\Repository;
+use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Str;
+use LogicException;
 use Muchwat\OpendataloaderPdf\Contracts\PdfExtractor as PdfExtractorContract;
 use Muchwat\OpendataloaderPdf\Exceptions\PdfExtractionException;
+use Muchwat\OpendataloaderPdf\Infrastructure\OpendataloaderCli;
 use Muchwat\OpendataloaderPdf\Parsing\PageOutputParser;
-use Muchwat\OpendataloaderPdf\Support\CliProcess;
-use Throwable;
 
 /**
  * Wraps the opendataloader-pdf CLI (https://github.com/opendataloader-project/opendataloader-pdf)
@@ -25,7 +22,21 @@ use Throwable;
  */
 class PdfExtractor implements PdfExtractorContract
 {
+    private ?Repository $configuration = null;
+
+    private ?OpendataloaderCli $cli = null;
+
     private ?PageOutputParser $pageOutputParser = null;
+
+    public function __construct(
+        ?Repository $configuration = null,
+        ?OpendataloaderCli $cli = null,
+        ?PageOutputParser $pageOutputParser = null,
+    ) {
+        $this->configuration = $configuration;
+        $this->cli = $cli;
+        $this->pageOutputParser = $pageOutputParser;
+    }
 
     /**
      * True once OPENDATALOADER_PDF_COMMAND is set - that one setting is
@@ -34,7 +45,7 @@ class PdfExtractor implements PdfExtractorContract
      */
     public function enabled(): bool
     {
-        return filled(config('opendataloader-pdf.command'));
+        return filled($this->configuration()->get('opendataloader-pdf.command'));
     }
 
     /**
@@ -92,7 +103,7 @@ class PdfExtractor implements PdfExtractorContract
      */
     protected function runExtraction(string $pdfPath): array
     {
-        $binary = trim((string) config('opendataloader-pdf.command'));
+        $binary = trim((string) $this->configuration()->get('opendataloader-pdf.command'));
 
         // A random marker per call, rather than one fixed string, means
         // there's nothing to coordinate or collide with: no real document
@@ -103,97 +114,17 @@ class PdfExtractor implements PdfExtractorContract
         $pageMarkerSuffix = '_END';
         $separatorTemplate = $pageMarkerPrefix.'%page-number%'.$pageMarkerSuffix;
 
-        $command = $this->buildCommand($binary, $separatorTemplate, $pdfPath);
-        $pending = $this->preparedProcess((int) config('opendataloader-pdf.timeout', 120));
-        $result = $this->runProcessOrFail($pending, $command, $binary);
+        $output = $this->cli()->extract(
+            $binary,
+            $pdfPath,
+            $separatorTemplate,
+            (int) $this->configuration()->get('opendataloader-pdf.timeout', 120),
+            $this->configuration()->get('opendataloader-pdf.path'),
+        );
 
-        $pages = $this->parsePages($result->output(), $pageMarkerPrefix, $pageMarkerSuffix);
+        $pages = $this->parsePages($output, $pageMarkerPrefix, $pageMarkerSuffix);
 
         return $this->ensureTextExtracted($pages);
-    }
-
-    /**
-     * @return list<string>
-     */
-    private function buildCommand(string $binary, string $separatorTemplate, string $pdfPath): array
-    {
-        return array_merge(
-            CliProcess::splitCommand($binary),
-            [
-                '--format', 'markdown',
-                '--to-stdout',
-                '--quiet',
-                '--image-output', 'off',
-                '--markdown-page-separator', $separatorTemplate,
-                $pdfPath,
-            ]
-        );
-    }
-
-    private function preparedProcess(int $timeout): PendingProcess
-    {
-        return CliProcess::withExtraPath(
-            Process::timeout($timeout),
-            config('opendataloader-pdf.path'),
-        );
-    }
-
-    /**
-     * @param  list<string>  $command
-     *
-     * @throws PdfExtractionException
-     */
-    private function runProcessOrFail(PendingProcess $pending, array $command, string $binary): ProcessResult
-    {
-        try {
-            $result = $pending->run($command);
-        } catch (ProcessTimedOutException $e) {
-            throw PdfExtractionException::failed(
-                'PDF extraction timed out before it finished - the file may be too large or complex.'
-            );
-        } catch (Throwable $e) {
-            throw $this->processCouldNotStart($e, $binary);
-        }
-
-        if ($result->exitCode() === 127) {
-            Log::warning('PDF extraction command not found.', ['command' => $binary]);
-
-            throw PdfExtractionException::notConfigured(
-                "The PDF extraction command \"{$binary}\" was not found. Install opendataloader-pdf (`pip install -U opendataloader-pdf`, requires Java 11+) and check OPENDATALOADER_PDF_COMMAND."
-            );
-        }
-
-        if ($result->failed()) {
-            Log::warning('PDF extraction failed.', [
-                'command' => $binary,
-                'exit_code' => $result->exitCode(),
-                'stderr' => $result->errorOutput(),
-            ]);
-
-            throw PdfExtractionException::failed(
-                'PDF extraction failed: '.Str::limit(trim($result->errorOutput() ?: $result->output()), 300)
-            );
-        }
-
-        return $result;
-    }
-
-    /**
-     * Pulled out of runProcessOrFail()'s generic catch(Throwable) arm so it's
-     * a pure function of (exception, binary name) - that makes it directly
-     * unit-testable via reflection, which the branch as a whole isn't:
-     * Process::fake() has no way to make a faked run throw.
-     */
-    private function processCouldNotStart(Throwable $e, string $binary): PdfExtractionException
-    {
-        Log::warning('PDF extraction command could not be started.', [
-            'command' => $binary,
-            'exception' => $e->getMessage(),
-        ]);
-
-        return PdfExtractionException::notConfigured(
-            "Could not run the PDF extraction command \"{$binary}\". Install opendataloader-pdf (`pip install -U opendataloader-pdf`, requires Java 11+) and make sure OPENDATALOADER_PDF_COMMAND points to it."
-        );
     }
 
     /**
@@ -229,5 +160,25 @@ class PdfExtractor implements PdfExtractorContract
     private function pageOutputParser(): PageOutputParser
     {
         return $this->pageOutputParser ??= new PageOutputParser;
+    }
+
+    private function cli(): OpendataloaderCli
+    {
+        return $this->cli ??= OpendataloaderCli::fromLaravelFacades();
+    }
+
+    private function configuration(): Repository
+    {
+        if ($this->configuration instanceof Repository) {
+            return $this->configuration;
+        }
+
+        $configuration = Config::getFacadeRoot();
+
+        if (! $configuration instanceof Repository) {
+            throw new LogicException('The Laravel configuration service must be available before extracting PDFs.');
+        }
+
+        return $this->configuration = $configuration;
     }
 }

@@ -293,28 +293,25 @@ it('currently classifies a process timeout as a per-file failure without logging
     Log::shouldNotHaveReceived('warning');
 });
 
-it('translates a process-could-not-start failure into a configuration exception and logs it', function () {
-    // Process::fake() has no API to make a faked run() throw, so the real
-    // "process could not even start" branch inside runProcessOrFail() isn't
-    // reachable through the public API in tests. It was pulled into its own
-    // pure method (exception + binary name in, PdfExtractionException out)
-    // specifically so it can be exercised directly here instead.
+it('translates a process-could-not-start failure through the public API and logs it', function () {
     Log::spy();
 
-    $reflection = new ReflectionMethod(PdfExtractor::class, 'processCouldNotStart');
-    $reflection->setAccessible(true);
+    $pending = Mockery::mock(PendingProcess::class);
+    $pending->shouldReceive('run')->once()->andThrow(new RuntimeException('permission denied'));
+    Process::shouldReceive('timeout')->once()->with(120)->andReturn($pending);
 
-    $exception = $reflection->invoke(
-        app(PdfExtractor::class),
-        new RuntimeException('permission denied'),
-        '/usr/local/bin/opendataloader-pdf',
-    );
+    Config::set('opendataloader-pdf.command', '/usr/local/bin/opendataloader-pdf');
 
-    expect($exception)->toBeInstanceOf(PdfExtractionException::class);
-    expect($exception->isConfigurationIssue)->toBeTrue();
-    expect($exception->getMessage())
-        ->toContain('/usr/local/bin/opendataloader-pdf')
-        ->toContain('OPENDATALOADER_PDF_COMMAND');
+    try {
+        app(PdfExtractor::class)->extractPages(tempPdfPath());
+        test()->fail('Expected a PdfExtractionException.');
+    } catch (PdfExtractionException $exception) {
+        expect($exception)->toBeInstanceOf(PdfExtractionException::class)
+            ->and($exception->isConfigurationIssue)->toBeTrue()
+            ->and($exception->getMessage())
+            ->toContain('/usr/local/bin/opendataloader-pdf')
+            ->toContain('OPENDATALOADER_PDF_COMMAND');
+    }
 
     Log::shouldHaveReceived('warning')
         ->once()
