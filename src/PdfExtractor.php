@@ -6,12 +6,15 @@ namespace Muchwat\OpendataloaderPdf;
 
 use Illuminate\Contracts\Config\Repository;
 use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use LogicException;
 use Muchwat\OpendataloaderPdf\Contracts\PdfExtractor as PdfExtractorContract;
 use Muchwat\OpendataloaderPdf\Exceptions\PdfExtractionException;
 use Muchwat\OpendataloaderPdf\Infrastructure\OpendataloaderCli;
 use Muchwat\OpendataloaderPdf\Parsing\PageOutputParser;
+use Psr\Log\LoggerInterface;
+use Throwable;
 
 /**
  * Wraps the opendataloader-pdf CLI (https://github.com/opendataloader-project/opendataloader-pdf)
@@ -28,14 +31,18 @@ class PdfExtractor implements PdfExtractorContract
 
     private ?PageOutputParser $pageOutputParser = null;
 
+    private ?LoggerInterface $logger = null;
+
     public function __construct(
         ?Repository $configuration = null,
         ?OpendataloaderCli $cli = null,
         ?PageOutputParser $pageOutputParser = null,
+        ?LoggerInterface $logger = null,
     ) {
         $this->configuration = $configuration;
         $this->cli = $cli;
         $this->pageOutputParser = $pageOutputParser;
+        $this->logger = $logger;
     }
 
     /**
@@ -75,6 +82,10 @@ class PdfExtractor implements PdfExtractorContract
             throw PdfExtractionException::failed("PDF file not found at [{$pdfPath}].");
         }
 
+        if (! is_readable($pdfPath)) {
+            throw PdfExtractionException::failed("PDF file is not readable at [{$pdfPath}].");
+        }
+
         // The CLI rejects its input by filename, not content - a framework
         // upload's real path is often an extensionless temp file (e.g.
         // /tmp/phpXXXXXX), so it has to be handed a renamed copy ending in
@@ -82,19 +93,90 @@ class PdfExtractor implements PdfExtractorContract
         $tempCopy = null;
         $workingPath = $pdfPath;
         if (! Str::endsWith(strtolower($pdfPath), '.pdf')) {
-            $tempCopy = sys_get_temp_dir().'/'.Str::uuid().'.pdf';
-            if (! @copy($pdfPath, $tempCopy)) {
-                throw PdfExtractionException::failed('Could not prepare the PDF for extraction.');
-            }
+            $tempCopy = $this->createTemporaryPdfCopy($pdfPath);
             $workingPath = $tempCopy;
         }
 
         try {
             return $this->runExtraction($workingPath);
         } finally {
-            if ($tempCopy) {
-                @unlink($tempCopy);
+            if ($tempCopy !== null) {
+                $this->removeTemporaryPdf($tempCopy);
             }
+        }
+    }
+
+    /**
+     * Copy an extensionless upload into a private, exclusively-created file
+     * because the upstream CLI validates the filename suffix.
+     *
+     * @throws PdfExtractionException
+     */
+    private function createTemporaryPdfCopy(string $sourcePath): string
+    {
+        $source = @fopen($sourcePath, 'rb');
+
+        if ($source === false) {
+            throw PdfExtractionException::failed("PDF file is not readable at [{$sourcePath}].");
+        }
+
+        try {
+            [$temporaryPath, $target] = $this->openTemporaryPdf();
+
+            try {
+                try {
+                    if (stream_copy_to_stream($source, $target) === false) {
+                        throw PdfExtractionException::failed('Could not prepare the PDF for extraction.');
+                    }
+                } finally {
+                    fclose($target);
+                }
+            } catch (Throwable $exception) {
+                $this->removeTemporaryPdf($temporaryPath);
+
+                throw $exception;
+            }
+        } finally {
+            fclose($source);
+        }
+
+        return $temporaryPath;
+    }
+
+    /** @return array{0: string, 1: resource} */
+    private function openTemporaryPdf(): array
+    {
+        try {
+            $path = sys_get_temp_dir().'/opendataloader-pdf-'.bin2hex(random_bytes(16)).'.pdf';
+        } catch (Throwable $exception) {
+            throw PdfExtractionException::notConfigured(
+                'Could not generate a secure temporary filename for PDF extraction.',
+                $exception,
+            );
+        }
+
+        $handle = @fopen($path, 'x+b');
+
+        if ($handle === false || ! @chmod($path, 0600)) {
+            if (is_resource($handle)) {
+                fclose($handle);
+                $this->removeTemporaryPdf($path);
+            }
+
+            throw PdfExtractionException::notConfigured(
+                'Could not create a private temporary file for PDF extraction. Check the system temporary directory.'
+            );
+        }
+
+        return [$path, $handle];
+    }
+
+    private function removeTemporaryPdf(string $path): void
+    {
+        if (is_file($path) && ! @unlink($path)) {
+            $this->logger()->warning('Could not remove a temporary PDF extraction file.', [
+                'path' => $path,
+            ]);
         }
     }
 
@@ -175,5 +257,20 @@ class PdfExtractor implements PdfExtractorContract
         }
 
         return $this->configuration = $configuration;
+    }
+
+    private function logger(): LoggerInterface
+    {
+        if ($this->logger instanceof LoggerInterface) {
+            return $this->logger;
+        }
+
+        $logger = Log::getFacadeRoot();
+
+        if (! $logger instanceof LoggerInterface) {
+            throw new LogicException('The Laravel log service must be available before extracting PDFs.');
+        }
+
+        return $this->logger = $logger;
     }
 }

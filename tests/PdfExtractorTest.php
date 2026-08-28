@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use Illuminate\Process\Exceptions\ProcessTimedOutException;
 use Illuminate\Process\PendingProcess;
 use Illuminate\Support\Facades\Config;
@@ -157,6 +159,53 @@ it('hands the CLI a .pdf-suffixed path, not an extensionless one', function () {
     expect($workingPath)->not->toBe($inputPath)
         ->and($workingPath)->toEndWith('.pdf')
         ->and(is_file($workingPath))->toBeFalse();
+});
+
+it('creates an extension-normalizing copy with private permissions', function () {
+    $workingPath = null;
+
+    Process::fake(function ($process) use (&$workingPath) {
+        $workingPath = end($process->command);
+
+        if (DIRECTORY_SEPARATOR !== '\\') {
+            expect(fileperms($workingPath) & 0777)->toBe(0600);
+        }
+
+        return Process::result(output: '# Title');
+    });
+
+    app(PdfExtractor::class)->extractPages(tempPdfPath(withPdfExtension: false));
+
+    expect($workingPath)->toEndWith('.pdf')
+        ->and(is_file($workingPath))->toBeFalse();
+});
+
+it('rejects an unreadable PDF before spawning a process', function () {
+    if (DIRECTORY_SEPARATOR === '\\') {
+        test()->markTestSkipped('POSIX file permissions are not available on Windows.');
+    }
+
+    $path = tempPdfPath();
+    chmod($path, 0000);
+
+    if (is_readable($path)) {
+        chmod($path, 0600);
+        test()->markTestSkipped('The current user can read mode-000 files.');
+    }
+
+    Process::fake();
+
+    try {
+        app(PdfExtractor::class)->extractPages($path);
+        test()->fail('Expected a PdfExtractionException.');
+    } catch (PdfExtractionException $exception) {
+        expect($exception)->toBeInstanceOf(PdfProcessingException::class)
+            ->and($exception->getMessage())->toContain('not readable');
+    } finally {
+        chmod($path, 0600);
+    }
+
+    Process::assertNothingRan();
 });
 
 it('passes the exact configured argv timeout and PATH environment to the process', function () {
