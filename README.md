@@ -105,20 +105,6 @@ automates this whole check.
 composer require muchwat/opendataloader-pdf-laravel
 ```
 
-For local package development, use a path repository instead:
-
-```json
-{
-    "repositories": [
-        {
-            "type": "path",
-            "url": "../opendataloader-pdf",
-            "options": { "symlink": true }
-        }
-    ]
-}
-```
-
 Laravel package discovery registers the service provider and
 `OpendataloaderPdf` facade automatically.
 

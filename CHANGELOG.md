@@ -2,6 +2,13 @@
 
 All notable changes to this package are documented here.
 
+## [2.0.1] - 2026-08-28
+
+### Documentation
+
+- Removed contributor-only path-repository setup from the public README so
+  package installation focuses on the standard Composer command.
+
 ## [2.0.0] - 2026-08-27
 
 ### Removed (breaking change)
