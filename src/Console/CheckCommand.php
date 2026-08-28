@@ -1,13 +1,12 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Muchwat\OpendataloaderPdf\Console;
 
 use Illuminate\Console\Command;
-use Illuminate\Contracts\Process\ProcessResult;
-use Illuminate\Process\Exceptions\ProcessTimedOutException;
-use Illuminate\Support\Facades\Process;
-use Muchwat\OpendataloaderPdf\Support\CliProcess;
-use Throwable;
+use Muchwat\OpendataloaderPdf\Exceptions\PdfExtractionException;
+use Muchwat\OpendataloaderPdf\Infrastructure\OpendataloaderCli;
 
 /**
  * Runs the same checks a first deploy normally does by hand - is the
@@ -25,29 +24,36 @@ class CheckCommand extends Command
 
     protected $description = 'Verify the opendataloader-pdf CLI is installed, reachable, and new enough';
 
+    private ?OpendataloaderCli $cli = null;
+
+    public function __construct(?OpendataloaderCli $cli = null)
+    {
+        parent::__construct();
+
+        $this->cli = $cli;
+    }
+
     public function handle(): int
     {
-        $binary = trim((string) config('opendataloader-pdf.command'));
+        try {
+            $binary = $this->cli()->command();
+        } catch (PdfExtractionException $exception) {
+            $this->components->error($exception->getMessage());
 
-        if (! $this->ensureCommandConfigured($binary)) {
             return self::FAILURE;
         }
 
         $this->components->info("Checking \"{$binary}\"...");
 
-        $result = $this->runHelpCheck($binary);
+        $helpOutput = $this->runHelpCheck();
 
-        if ($result === null) {
-            return self::FAILURE;
-        }
-
-        if (! $this->ensureProcessSucceeded($result, $binary)) {
+        if ($helpOutput === null) {
             return self::FAILURE;
         }
 
         $this->components->info('The CLI runs and responds to --help.');
 
-        if (! $this->ensureSeparatorFlagSupported($result)) {
+        if (! $this->ensureSeparatorFlagSupported($helpOutput)) {
             return self::FAILURE;
         }
 
@@ -58,77 +64,24 @@ class CheckCommand extends Command
         return self::SUCCESS;
     }
 
-    private function ensureCommandConfigured(string $binary): bool
-    {
-        if ($binary !== '') {
-            return true;
-        }
-
-        $this->components->error('OPENDATALOADER_PDF_COMMAND is empty.');
-
-        return false;
-    }
-
     /**
-     * Runs `{$binary} --help` and reports either failure mode directly,
-     * returning null so the caller just has to check for that - mirrors
-     * PdfExtractor::runProcessOrFail()'s two-catch shape for the same
-     * reason: Process::fake() can't simulate either exception, so this
-     * stays a thin, visually-inspectable wrapper rather than something
-     * that needs to be unit-tested in isolation.
+     * Run the shared CLI capability check and report a domain failure using
+     * the command's console UI.
      */
-    private function runHelpCheck(string $binary): ?ProcessResult
+    private function runHelpCheck(): ?string
     {
-        $pending = CliProcess::withExtraPath(
-            Process::timeout(15),
-            config('opendataloader-pdf.path'),
-        );
-
         try {
-            return $pending->run([...CliProcess::splitCommand($binary), '--help']);
-        } catch (ProcessTimedOutException) {
-            $this->components->error('The command did not respond within 15 seconds.');
-
-            return null;
-        } catch (Throwable $e) {
-            $this->components->error("Could not start the command: {$e->getMessage()}");
+            return $this->cli()->help();
+        } catch (PdfExtractionException $exception) {
+            $this->components->error($exception->getMessage());
 
             return null;
         }
     }
 
-    private function ensureProcessSucceeded(ProcessResult $result, string $binary): bool
+    private function ensureSeparatorFlagSupported(string $helpOutput): bool
     {
-        if ($result->exitCode() === 127) {
-            $this->components->error("Command not found: \"{$binary}\".");
-            $this->line('  Install it with: pip install -U opendataloader-pdf (or pipx, see README)');
-            $this->line('  Then set OPENDATALOADER_PDF_COMMAND to its full path if it still is not found on PATH.');
-
-            return false;
-        }
-
-        if (! $result->failed()) {
-            return true;
-        }
-
-        $errorOutput = trim($result->errorOutput() ?: $result->output());
-
-        if (str_contains($errorOutput, 'Unable to locate a Java Runtime') || str_contains($errorOutput, 'java')) {
-            $this->components->error('The CLI could not find a Java runtime (11+ required).');
-            $this->line('  Confirm it separately with: java -version');
-            $this->line("  If that works but this check still fails, set OPENDATALOADER_PDF_PATH to java's directory (e.g. `which java`).");
-
-            return false;
-        }
-
-        $this->components->error("Command exited with an error:\n{$errorOutput}");
-
-        return false;
-    }
-
-    private function ensureSeparatorFlagSupported(ProcessResult $result): bool
-    {
-        if (str_contains($result->output(), '--markdown-page-separator')) {
+        if (str_contains($helpOutput, '--markdown-page-separator')) {
             return true;
         }
 
@@ -137,5 +90,10 @@ class CheckCommand extends Command
         );
 
         return false;
+    }
+
+    private function cli(): OpendataloaderCli
+    {
+        return $this->cli ??= OpendataloaderCli::fromLaravelFacades();
     }
 }

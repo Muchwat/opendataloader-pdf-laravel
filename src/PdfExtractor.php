@@ -103,8 +103,6 @@ class PdfExtractor implements PdfExtractorContract
      */
     protected function runExtraction(string $pdfPath): array
     {
-        $binary = trim((string) $this->configuration()->get('opendataloader-pdf.command'));
-
         // A random marker per call, rather than one fixed string, means
         // there's nothing to coordinate or collide with: no real document
         // will ever contain this exact 20-character token, so there's no
@@ -115,11 +113,8 @@ class PdfExtractor implements PdfExtractorContract
         $separatorTemplate = $pageMarkerPrefix.'%page-number%'.$pageMarkerSuffix;
 
         $output = $this->cli()->extract(
-            $binary,
             $pdfPath,
             $separatorTemplate,
-            (int) $this->configuration()->get('opendataloader-pdf.timeout', 120),
-            $this->configuration()->get('opendataloader-pdf.path'),
         );
 
         $pages = $this->parsePages($output, $pageMarkerPrefix, $pageMarkerSuffix);

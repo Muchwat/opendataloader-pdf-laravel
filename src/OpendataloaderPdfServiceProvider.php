@@ -24,6 +24,7 @@ class OpendataloaderPdfServiceProvider extends ServiceProvider
         $this->app->singleton(
             OpendataloaderCli::class,
             fn ($app) => new OpendataloaderCli(
+                $app->make(Repository::class),
                 $app->make(Factory::class),
                 $app->make(LoggerInterface::class),
             ),
