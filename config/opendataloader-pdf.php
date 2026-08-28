@@ -27,11 +27,10 @@ return [
     | Extra PATH
     |--------------------------------------------------------------------------
     |
-    | Colon-separated directories prepended to PATH for the extraction
-    | process only. Needed when the CLI's own internal call to `java` can't
-    | find it under the web server's PATH, even though the command above
-    | resolves fine on its own (a common symptom: the process fails with
-    | "Unable to locate a Java Runtime"). Run `php artisan
+    | Directories prepended to PATH for the extraction process only. Separate
+    | multiple directories with the platform PATH separator (`:` on Unix,
+    | `;` on Windows). Needed when the CLI's own internal call to `java`
+    | cannot find it under the web server's PATH. Run `php artisan
     | opendataloader-pdf:check` after changing this.
     |
     */
@@ -42,12 +41,10 @@ return [
     | Timeout
     |--------------------------------------------------------------------------
     |
-    | Seconds to allow the CLI to run before it's killed. Each call spawns a
-    | JVM under the hood, so this can take a few seconds even for a short
-    | document and meaningfully longer for a large or complex one. This
-    | package throttles nothing itself - if you expose extraction over
-    | HTTP, rate-limit that route (each request is comparatively expensive)
-    | and consider raising your web server's own request timeout to match.
+    | Positive whole number of seconds to allow the CLI to run before it is
+    | killed. Each call spawns a JVM under the hood, so large or complex
+    | documents should normally be processed by a queue worker. This package
+    | does not add throttling or retry policy to the host application.
     |
     */
     'timeout' => env('OPENDATALOADER_PDF_TIMEOUT', 120),

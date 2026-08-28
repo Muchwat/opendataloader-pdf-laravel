@@ -8,10 +8,9 @@ use Illuminate\Process\PendingProcess;
 use InvalidArgumentException;
 
 /**
- * Two small pieces of process-setup logic shared verbatim between
- * PdfExtractor and CheckCommand - the config-driven CLI they each shell out
- * to needs the same argv splitting and the same optional PATH extension
- * either way.
+ * Backward-compatible command tokenization and PATH preparation used by the
+ * OpenDataLoader CLI adapter. Keeping these operations free of configuration
+ * and process execution makes their platform-specific behavior easy to test.
  */
 final class CliProcess
 {
