@@ -22,7 +22,7 @@
         "laravel/pint": "^1.0",
         "orchestra/testbench": "^8.0|^9.0|^10.0|^11.0",
         "pestphp/pest": "^2.0|^3.0|^4.0",
-        "phpmd/phpmd": "^2.15",
+        "phpmd/phpmd": "^2.15 || ^3.0",
         "phpstan/phpstan": "^2.1"
     },
     "autoload": {
